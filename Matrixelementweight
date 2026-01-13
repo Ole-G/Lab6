@@ -1,0 +1,302 @@
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.*;
+
+/**
+ * Лабораторна робота №6. Варіант 7.
+ * 
+ * Вагою елемента матриці A назвемо суму відмінних від нього елементів матриці,
+ * які містяться у одному рядку чи одному стовпці з ним.
+ * 
+ * Програма знаходить елементи з найбільшою вагою.
+ * 
+ * @author Student
+ */
+public class MatrixElementWeight {
+
+    /**
+     * Клас для зберігання результату обчислення ваги елемента
+     */
+    static class ElementWeight {
+        int row;
+        int col;
+        double value;
+        double weight;
+
+        ElementWeight(int row, int col, double value, double weight) {
+            this.row = row;
+            this.col = col;
+            this.value = value;
+            this.weight = weight;
+        }
+    }
+
+    /**
+     * Клас-задача для паралельного обчислення ваги елементів у діапазоні рядків
+     */
+    static class WeightCalculator implements Callable<ElementWeight> {
+        private final double[][] matrix;
+        private final int startRow;
+        private final int endRow;
+        private final int m; // кількість рядків
+        private final int n; // кількість стовпців
+
+        WeightCalculator(double[][] matrix, int startRow, int endRow) {
+            this.matrix = matrix;
+            this.startRow = startRow;
+            this.endRow = endRow;
+            this.m = matrix.length;
+            this.n = matrix[0].length;
+        }
+
+        @Override
+        public ElementWeight call() {
+            ElementWeight maxElement = null;
+            double maxWeight = Double.NEGATIVE_INFINITY;
+
+            for (int i = startRow; i < endRow; i++) {
+                for (int j = 0; j < n; j++) {
+                    double currentValue = matrix[i][j];
+                    double weight = 0;
+
+                    // Сума елементів рядка, відмінних від поточного значення
+                    for (int k = 0; k < n; k++) {
+                        if (k != j && matrix[i][k] != currentValue) {
+                            weight += matrix[i][k];
+                        }
+                    }
+
+                    // Сума елементів стовпця, відмінних від поточного значення
+                    for (int k = 0; k < m; k++) {
+                        if (k != i && matrix[k][j] != currentValue) {
+                            weight += matrix[k][j];
+                        }
+                    }
+
+                    if (weight > maxWeight) {
+                        maxWeight = weight;
+                        maxElement = new ElementWeight(i, j, currentValue, weight);
+                    }
+                }
+            }
+
+            return maxElement;
+        }
+    }
+
+    /**
+     * Послідовне обчислення елементів з найбільшою вагою
+     */
+    public static List<ElementWeight> findMaxWeightSerial(double[][] matrix) {
+        int m = matrix.length;
+        int n = matrix[0].length;
+        double maxWeight = Double.NEGATIVE_INFINITY;
+        List<ElementWeight> maxElements = new ArrayList<>();
+
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < n; j++) {
+                double currentValue = matrix[i][j];
+                double weight = 0;
+
+                // Сума елементів рядка, відмінних від поточного значення
+                for (int k = 0; k < n; k++) {
+                    if (k != j && matrix[i][k] != currentValue) {
+                        weight += matrix[i][k];
+                    }
+                }
+
+                // Сума елементів стовпця, відмінних від поточного значення
+                for (int k = 0; k < m; k++) {
+                    if (k != i && matrix[k][j] != currentValue) {
+                        weight += matrix[k][j];
+                    }
+                }
+
+                if (weight > maxWeight) {
+                    maxWeight = weight;
+                    maxElements.clear();
+                    maxElements.add(new ElementWeight(i, j, currentValue, weight));
+                } else if (weight == maxWeight) {
+                    maxElements.add(new ElementWeight(i, j, currentValue, weight));
+                }
+            }
+        }
+
+        return maxElements;
+    }
+
+    /**
+     * Паралельне обчислення елементів з найбільшою вагою
+     */
+    public static List<ElementWeight> findMaxWeightParallel(double[][] matrix, int threadCount) 
+            throws InterruptedException, ExecutionException {
+        
+        int m = matrix.length;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        List<Future<ElementWeight>> futures = new ArrayList<>();
+
+        // Розподіл рядків між потоками
+        int rowsPerThread = m / threadCount;
+        int remainingRows = m % threadCount;
+
+        int startRow = 0;
+        for (int t = 0; t < threadCount; t++) {
+            int endRow = startRow + rowsPerThread + (t < remainingRows ? 1 : 0);
+            if (startRow < endRow) {
+                futures.add(executor.submit(new WeightCalculator(matrix, startRow, endRow)));
+            }
+            startRow = endRow;
+        }
+
+        // Збір результатів
+        double maxWeight = Double.NEGATIVE_INFINITY;
+        List<ElementWeight> maxElements = new ArrayList<>();
+
+        for (Future<ElementWeight> future : futures) {
+            ElementWeight result = future.get();
+            if (result != null) {
+                if (result.weight > maxWeight) {
+                    maxWeight = result.weight;
+                    maxElements.clear();
+                    maxElements.add(result);
+                } else if (result.weight == maxWeight) {
+                    maxElements.add(result);
+                }
+            }
+        }
+
+        executor.shutdown();
+        return maxElements;
+    }
+
+    /**
+     * Генерація випадкової матриці
+     */
+    public static double[][] generateMatrix(int m, int n, long seed) {
+        Random random = new Random(seed);
+        double[][] matrix = new double[m][n];
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < n; j++) {
+                matrix[i][j] = random.nextInt(100); // цілі числа від 0 до 99
+            }
+        }
+        return matrix;
+    }
+
+    /**
+     * Виведення матриці (для малих розмірів)
+     */
+    public static void printMatrix(double[][] matrix) {
+        System.out.println("Матриця:");
+        for (double[] row : matrix) {
+            for (double val : row) {
+                System.out.printf("%6.0f ", val);
+            }
+            System.out.println();
+        }
+        System.out.println();
+    }
+
+    /**
+     * Головний метод
+     */
+    public static void main(String[] args) throws InterruptedException, ExecutionException {
+        System.out.println("=".repeat(70));
+        System.out.println("Лабораторна робота №6. Варіант 7.");
+        System.out.println("Знаходження елементів матриці з найбільшою вагою");
+        System.out.println("=".repeat(70));
+        System.out.println();
+
+        // Тестові розміри матриць
+        int[][] testSizes = {
+            {500, 500},
+            {1000, 1000},
+            {1500, 1500}
+        };
+
+        // Кількість потоків для тестування
+        int[] threadCounts = {1, 2, 4, 8, 12};
+
+        // Кількість процесорів
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        System.out.println("Доступна кількість логічних процесорів: " + availableProcessors);
+        System.out.println();
+
+        // Демонстрація на малій матриці
+        System.out.println("-".repeat(70));
+        System.out.println("ДЕМОНСТРАЦІЯ НА МАЛІЙ МАТРИЦІ 5x5:");
+        System.out.println("-".repeat(70));
+        
+        double[][] smallMatrix = generateMatrix(5, 5, 42);
+        printMatrix(smallMatrix);
+        
+        List<ElementWeight> smallResult = findMaxWeightSerial(smallMatrix);
+        System.out.println("Елементи з найбільшою вагою:");
+        for (ElementWeight ew : smallResult) {
+            System.out.printf("  Позиція [%d][%d], значення = %.0f, вага = %.0f%n",
+                    ew.row, ew.col, ew.value, ew.weight);
+        }
+        System.out.println();
+
+        // Таблиця результатів
+        System.out.println("-".repeat(70));
+        System.out.println("РЕЗУЛЬТАТИ ТЕСТУВАННЯ ПРОДУКТИВНОСТІ:");
+        System.out.println("-".repeat(70));
+        System.out.println();
+
+        for (int[] size : testSizes) {
+            int m = size[0];
+            int n = size[1];
+            
+            System.out.println("Розмір матриці: " + m + " x " + n);
+            System.out.println("-".repeat(50));
+            System.out.printf("%-15s %15s %15s%n", "Потоків", "Час (мс)", "Прискорення");
+            System.out.println("-".repeat(50));
+
+            // Генерація матриці
+            double[][] matrix = generateMatrix(m, n, 12345);
+
+            // Послідовне виконання
+            long startSerial = System.nanoTime();
+            List<ElementWeight> serialResult = findMaxWeightSerial(matrix);
+            long durationSerial = System.nanoTime() - startSerial;
+            double serialTimeMs = durationSerial / 1_000_000.0;
+
+            System.out.printf("%-15s %15.2f %15s%n", "Послідовно", serialTimeMs, "1.00x");
+
+            // Паралельне виконання з різною кількістю потоків
+            for (int threads : threadCounts) {
+                // Прогрів JVM
+                findMaxWeightParallel(matrix, threads);
+
+                long startParallel = System.nanoTime();
+                List<ElementWeight> parallelResult = findMaxWeightParallel(matrix, threads);
+                long durationParallel = System.nanoTime() - startParallel;
+                double parallelTimeMs = durationParallel / 1_000_000.0;
+                
+                double speedup = serialTimeMs / parallelTimeMs;
+
+                System.out.printf("%-15d %15.2f %14.2fx%n", threads, parallelTimeMs, speedup);
+
+                // Перевірка коректності
+                if (Math.abs(serialResult.get(0).weight - parallelResult.get(0).weight) > 0.001) {
+                    System.out.println("  ПОМИЛКА: результати не співпадають!");
+                }
+            }
+
+            System.out.println();
+        }
+
+        // Підсумок
+        System.out.println("=".repeat(70));
+        System.out.println("ВИСНОВКИ:");
+        System.out.println("=".repeat(70));
+        System.out.println("1. Паралельна версія програми демонструє прискорення при");
+        System.out.println("   збільшенні кількості потоків до кількості фізичних ядер.");
+        System.out.println("2. Ефективність залежить від розміру матриці - більші матриці");
+        System.out.println("   краще масштабуються завдяки меншим накладним витратам.");
+        System.out.println("3. Максимальне прискорення обмежене законом Амдала.");
+        System.out.println("=".repeat(70));
+    }
+}
